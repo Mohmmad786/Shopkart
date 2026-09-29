@@ -1,4 +1,4 @@
-# ShopKart Database Setup
+# ShopKart Setup
 
 ShopKart uses PostgreSQL through the `pg` driver. Neon is the recommended hosted PostgreSQL provider for Vercel deployments.
 
