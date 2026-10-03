@@ -13,6 +13,7 @@ const { apiNotFound, errorHandler } = require('./src/middleware/errors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.set('trust proxy', process.env.VERCEL ? 1 : false);
 
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');

@@ -1,17 +1,14 @@
 // Every route here is Developer-only — enforced before ANY handler runs.
 const express = require('express');
 const crypto = require('crypto');
-const path = require('path');
-const fs = require('fs');
 const db = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { clean } = require('../utils/validators');
 const asyncHandler = require('../utils/asyncHandler');
+const { deleteProductImage } = require('../utils/productImages');
 
 const router = express.Router();
 router.use(authenticate, requireRole('developer'));
-
-const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
 
 router.get('/stats', asyncHandler(async (req, res) => {
   const totalUsers = (await db.prepare('SELECT COUNT(*) AS c FROM users').get()).c;
@@ -107,9 +104,9 @@ router.delete('/users/:id', asyncHandler(async (req, res) => {
 
   const images = await db.prepare('SELECT image FROM products WHERE seller_id = ?').all(target.id);
   await db.prepare('DELETE FROM users WHERE id = ?').run(target.id);
-  for (const row of images) {
-    fs.unlink(path.join(uploadDir, path.basename(row.image)), () => {});
-  }
+  await Promise.all(images.map(({ image }) => deleteProductImage(image).catch((error) => {
+    console.warn('[image cleanup failed]', error.message);
+  })));
   res.json({ ok: true });
 }));
 
