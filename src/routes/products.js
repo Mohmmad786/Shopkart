@@ -1,12 +1,12 @@
 const express = require('express');
 const path = require('path');
-const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
 const db = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { isValidPrice, clean, TITLE_MAX, DESC_MAX } = require('../utils/validators');
 const asyncHandler = require('../utils/asyncHandler');
+const { saveProductImage, deleteProductImage, removeTemporaryUpload } = require('../utils/productImages');
 
 const router = express.Router();
 const defaultUploadDir = process.env.VERCEL ? '/tmp/shopkart-uploads' : './uploads';
@@ -29,12 +29,6 @@ const upload = multer({
     cb(new Error('Only JPG, JPEG, PNG or WebP images are allowed.'));
   }
 });
-
-const diskPath = (publicPath) => path.join(uploadDir, path.basename(publicPath || ''));
-const unlinkQuiet = (publicPath) => {
-  if (!publicPath) return;
-  fs.unlink(diskPath(publicPath), () => {});
-};
 
 function uploadSingle(req, res, next) {
   upload.single('image')(req, res, (err) => {
@@ -115,45 +109,67 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
 // Create (seller / developer)
 router.post('/', authenticate, requireRole('seller', 'developer'), uploadSingle, asyncHandler(async (req, res) => {
-  const removeUploaded = () => { if (req.file) fs.unlink(req.file.path, () => {}); };
   if (!req.file) return res.status(400).json({ error: 'Product image is required.' });
 
   const { errors, title, description, price, categoryId } = await validateProductBody(req.body);
-  if (errors.length) { removeUploaded(); return res.status(400).json({ error: errors.join(' ') }); }
+  if (errors.length) {
+    await removeTemporaryUpload(req.file);
+    return res.status(400).json({ error: errors.join(' ') });
+  }
 
+  let image;
+  let inserted = false;
   try {
+    image = await saveProductImage(req.file);
     const info = await db.prepare(
       'INSERT INTO products (seller_id, category_id, title, image, price, description) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(req.user.id, categoryId, title, '/uploads/' + req.file.filename, price, description);
+    ).run(req.user.id, categoryId, title, image, price, description);
+    inserted = true;
 
     res.status(201).json({ product: await db.prepare('SELECT * FROM products WHERE id = ?').get(info.lastInsertRowid) });
-  } catch (error) { removeUploaded(); throw error; }
+  } catch (error) {
+    await removeTemporaryUpload(req.file).catch(() => {});
+    if (image && !inserted) await deleteProductImage(image).catch(() => {});
+    throw error;
+  }
 }));
 
 // Update (owner seller or developer; image optional)
 router.put('/:id', authenticate, requireRole('seller', 'developer'), uploadSingle, asyncHandler(async (req, res) => {
-  const removeUploaded = () => { if (req.file) fs.unlink(req.file.path, () => {}); };
+  let newImage;
+  let updated = false;
   try {
     const product = await db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
-    if (!product) { removeUploaded(); return res.status(404).json({ error: 'Product not found.' }); }
+    if (!product) {
+      await removeTemporaryUpload(req.file);
+      return res.status(404).json({ error: 'Product not found.' });
+    }
 
     if (req.user.role !== 'developer' && product.seller_id !== req.user.id) {
-      removeUploaded();
+      await removeTemporaryUpload(req.file);
       return res.status(403).json({ error: 'You can only edit your own products.' });
     }
 
     const { errors, title, description, price, categoryId } = await validateProductBody(req.body);
-    if (errors.length) { removeUploaded(); return res.status(400).json({ error: errors.join(' ') }); }
+    if (errors.length) {
+      await removeTemporaryUpload(req.file);
+      return res.status(400).json({ error: errors.join(' ') });
+    }
 
-    const newImage = req.file ? '/uploads/' + req.file.filename : product.image;
+    newImage = req.file ? await saveProductImage(req.file) : product.image;
     await db.prepare(
       'UPDATE products SET category_id = ?, title = ?, price = ?, description = ?, image = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
     ).run(categoryId, title, price, description, newImage, product.id);
+    updated = true;
 
-    if (req.file) unlinkQuiet(product.image);
+    if (req.file) await deleteProductImage(product.image).catch(() => {});
 
     res.json({ product: await db.prepare('SELECT * FROM products WHERE id = ?').get(product.id) });
-  } catch (error) { removeUploaded(); throw error; }
+  } catch (error) {
+    await removeTemporaryUpload(req.file).catch(() => {});
+    if (req.file && newImage && !updated) await deleteProductImage(newImage).catch(() => {});
+    throw error;
+  }
 }));
 
 // Delete (owner seller or developer)
@@ -166,7 +182,7 @@ router.delete('/:id', authenticate, requireRole('seller', 'developer'), asyncHan
   }
 
   await db.prepare('DELETE FROM products WHERE id = ?').run(product.id);
-  unlinkQuiet(product.image);
+  await deleteProductImage(product.image).catch(() => {});
   res.json({ ok: true });
 }));
 

@@ -16,13 +16,14 @@ function signToken(user) {
 function setAuthCookie(res, token) {
   res.cookie('token', token, {
     httpOnly: true,
+    path: '/',
     sameSite: 'lax',
-    secure: process.env.COOKIE_SECURE === 'true',
+    secure: process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production',
     maxAge: COOKIE_MAX_AGE
   });
 }
 
-function clearAuthCookie(res) { res.clearCookie('token'); }
+function clearAuthCookie(res) { res.clearCookie('token', { path: '/' }); }
 
 // Verifies the JWT, then ALWAYS reloads the user from the database.
 // Role/identity is taken from the DB, never trusted from the client.

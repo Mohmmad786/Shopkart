@@ -1,4 +1,4 @@
-# ShopKart Setup
+# ShopKart Database Setup
 
 ShopKart uses PostgreSQL through the `pg` driver. Neon is the recommended hosted PostgreSQL provider for Vercel deployments.
 
@@ -18,6 +18,10 @@ ShopKart uses PostgreSQL through the `pg` driver. Neon is the recommended hosted
 
 Deploy the project root with Vercel Drop or the Vercel CLI. Do not deploy the nested `dist` folder. The root `server.js` is the Express entrypoint, and Vercel serves files from `public/` through its CDN.
 
-After creating the Vercel project, add `DATABASE_URL`, `JWT_SECRET`, and `DEVELOPER_INVITE_CODE` as environment variables for each environment. Set `COOKIE_SECURE=true` for production. `PG_POOL_MAX` is optional and defaults to 5. Use a hosted PostgreSQL URL; `localhost` will not work from Vercel.
+After creating the Vercel project, add `DATABASE_URL`, `JWT_SECRET`, and `DEVELOPER_INVITE_CODE` as environment variables for each environment. Set `COOKIE_SECURE=true` for production. `PG_POOL_MAX` is optional and defaults to 1 to limit connections per serverless instance. Use a hosted PostgreSQL URL; `localhost` will not work from Vercel.
 
-Product images currently use local disk storage and are temporary on Vercel. Configure persistent object storage before production use. Existing SQLite files are not automatically imported into PostgreSQL. The application accepts images up to 4 MB to stay below Vercel Functions' 4.5 MB request-body limit.
+For production image uploads, create and connect a **public** Vercel Blob store to the project. The SDK uses Vercel's project OIDC credentials automatically; a `BLOB_READ_WRITE_TOKEN` also works when OIDC is unavailable. Product images are stored as public Blob URLs; local development continues to use `./uploads`. Admin account deletion also removes associated blobs. Existing product rows with `/uploads/...` image paths need their images migrated to Blob before old local files disappear. The application accepts images up to 4 MB to stay below Vercel Functions' 4.5 MB request-body limit.
+
+The first API request initializes the schema in a transaction protected by a PostgreSQL advisory lock. Auth rate limits are stored in PostgreSQL, so they are shared across serverless instances and require the database to be available.
+
+Existing SQLite files are not automatically imported into Neon. The database credential in the previously published `.env.example` must be rotated before production deployment; use the replacement URL only in Vercel environment variables, never in source control.
