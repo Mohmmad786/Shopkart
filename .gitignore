@@ -6,3 +6,6 @@
 /uploads/
 /dist/
 *.zip
+.vercel
+.env*
+!.env.example
