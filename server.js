@@ -44,10 +44,8 @@ app.use('/api/admin', adminRoutes);
 app.use('/api', apiNotFound);
 
 const publicDir = path.join(__dirname, 'public');
-if (!process.env.VERCEL) {
-  app.use(express.static(publicDir));
-  app.get('*', (req, res) => res.sendFile(path.join(publicDir, 'index.html')));
-}
+if (!process.env.VERCEL) app.use(express.static(publicDir));
+app.get('*', (req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
 app.use(errorHandler);
 if (require.main === module && process.env.NODE_ENV !== 'production') {
